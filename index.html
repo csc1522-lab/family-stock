@@ -42,19 +42,27 @@
 
   /* tabs */
   .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;}
-  .tab{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px 8px 0 0;background:var(--panel);color:var(--text-dim);border:1px solid var(--border);border-bottom:none;cursor:pointer;white-space:nowrap;transition:.15s;}
+  .tab{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px 8px 0 0;background:var(--panel);color:var(--text-dim);border:1px solid var(--border);border-bottom:none;cursor:grab;white-space:nowrap;transition:.15s;touch-action:pan-x;user-select:none;-webkit-user-select:none;}
   .tab.active{background:var(--panel-alt);color:var(--gold);border-color:var(--gold-dim);}
+  .tab.dragging{opacity:.55;cursor:grabbing;box-shadow:0 0 0 1px var(--gold-dim) inset;}
   .tab-add{font-family:var(--mono);font-size:16px;padding:8px 12px;border-radius:8px;background:transparent;color:var(--text-faint);border:1px dashed var(--border);cursor:pointer;}
   .tab-add:hover{color:var(--gold);border-color:var(--gold-dim);}
 
   /* summary */
-  .summary{display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;}
+  .summary{display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px;}
   .stat{padding:14px 10px;text-align:center;border-right:1px solid var(--border);}
   .stat:last-child{border-right:none;}
   .stat .label{font-size:11.5px;color:var(--text-dim);margin-bottom:6px;letter-spacing:.03em;}
   .stat .val{font-family:var(--mono);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;}
   .stat .val.up{color:var(--up);}
   .stat .val.down{color:var(--down);}
+
+  .cashrow{display:grid;grid-template-columns:repeat(2,1fr);background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;}
+  .cashrow .stat{border-right:1px solid var(--border);}
+  .cashrow .stat:last-child{border-right:none;}
+  .cashrow input{width:100%;background:transparent;border:none;text-align:center;font-family:var(--mono);font-size:15px;font-weight:600;color:var(--gold);font-variant-numeric:tabular-nums;outline:none;}
+  .cashrow input::placeholder{color:var(--text-faint);font-weight:400;}
+  @media (max-width:520px){ .cashrow{grid-template-columns:repeat(2,1fr);} }
 
   /* table */
   .tablewrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px;}
@@ -155,6 +163,13 @@
   </div>
 
   <div class="summary" id="summary"></div>
+  <div class="cashrow">
+    <div class="stat">
+      <div class="label">예수금</div>
+      <input type="text" inputmode="numeric" id="cashInput" placeholder="0">
+    </div>
+    <div class="stat"><div class="label">총자산 (주식+예수금)</div><div class="val" id="statTotalAssets">0</div></div>
+  </div>
 
   <div class="tablewrap">
     <table>
@@ -356,23 +371,12 @@ document.addEventListener('click', (e)=>{
   }
 });
 
+// 초기값은 비워둠. 실제 데이터는 백업 JSON(⬆ 아이콘 → 가져오기)으로 복원해서 사용.
 let state = {
-  members: ['최준우','최기훈'],
-  active: '최준우',
-  holdings: {
-    '최준우': [
-      {id:cid(), name:'kodex2차전지', code:'305720', buy:10300, qty:979, cur:12065, updated:null},
-      {id:cid(), name:'포스코홀딩스', code:'005490', buy:337236, qty:36, cur:300000, updated:null},
-      {id:cid(), name:'삼성물산', code:'028260', buy:305000, qty:8, cur:293000, updated:null},
-    ],
-    '최기훈': [
-      {id:cid(), name:'에코프로', code:'086520', buy:0, qty:0, cur:72700, updated:null},
-      {id:cid(), name:'kodex2차전지', code:'305720', buy:12208, qty:86, cur:12210, updated:null},
-      {id:cid(), name:'포스코홀딩스', code:'005490', buy:337236, qty:6, cur:299000, updated:null},
-      {id:cid(), name:'산일전기', code:'062040', buy:0, qty:0, cur:145800, updated:null},
-      {id:cid(), name:'한화오션', code:'042660', buy:131390, qty:52, cur:81000, updated:null},
-    ]
-  },
+  members: [],
+  active: '',
+  holdings: {},
+  cash: {},
   settings: { base:'https://kis-price-proxy.csc1522.workers.dev', template:'{base}?code={code}', path:'output.stck_prpr' }
 };
 
@@ -405,6 +409,7 @@ document.getElementById('exportBtn').onclick = ()=>{
     members: state.members,
     active: state.active,
     holdings: state.holdings,
+    cash: state.cash,
     settings: state.settings
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
@@ -433,6 +438,7 @@ document.getElementById('importBtn').onclick = ()=>{
       state.members = parsed.members;
       state.active = parsed.active && parsed.members.includes(parsed.active) ? parsed.active : parsed.members[0];
       state.holdings = parsed.holdings;
+      state.cash = parsed.cash || {};
       if(parsed.settings) state.settings = parsed.settings;
       await saveData();
       await saveSettings();
@@ -488,7 +494,7 @@ async function loadData(){
 }
 async function saveData(){
   try{
-    await storageSet('familyStock:data', JSON.stringify({members:state.members, active:state.active, holdings:state.holdings}), true);
+    await storageSet('familyStock:data', JSON.stringify({members:state.members, active:state.active, holdings:state.holdings, cash:state.cash}), true);
   }catch(e){ toast('저장 실패 - 다시 시도해주세요'); }
 }
 async function saveSettings(){
@@ -513,8 +519,10 @@ function renderTabs(){
     const b = document.createElement('button');
     b.className = 'tab' + (m===state.active?' active':'');
     b.textContent = m;
-    b.onclick = ()=>{ state.active = m; render(); };
+    b.dataset.member = m;
+    b.onclick = ()=>{ if(b.dataset.dragged) return; state.active = m; render(); };
     b.oncontextmenu = (e)=>{ e.preventDefault(); removeMember(m); };
+    attachTabDrag(b);
     el.appendChild(b);
   });
   const add = document.createElement('button');
@@ -525,11 +533,70 @@ function renderTabs(){
   el.appendChild(add);
 }
 
+// 탭을 옆으로 밀어서 순서를 바꾸는 드래그 재정렬.
+// 움직임이 거의 없는 짧은 탭/길게 누르기는 그대로 선택/삭제(contextmenu)로 동작하고,
+// 실제로 좌우로 손가락(마우스)을 움직였을 때만 재정렬이 시작되도록 이동 거리 기준으로 판단한다.
+function attachTabDrag(btn){
+  const tabsEl = document.getElementById('tabs');
+  const THRESH = 10;
+  let startX = 0, startY = 0, dragging = false, pointerId = null;
+
+  btn.addEventListener('pointerdown', (e)=>{
+    if(e.pointerType==='mouse' && e.button!==0) return;
+    startX = e.clientX; startY = e.clientY;
+    dragging = false;
+    pointerId = e.pointerId;
+  });
+
+  btn.addEventListener('pointermove', (e)=>{
+    if(pointerId===null || e.pointerId!==pointerId) return;
+    const dx = e.clientX-startX, dy = e.clientY-startY;
+    if(!dragging){
+      if(Math.abs(dx) > THRESH && Math.abs(dx) > Math.abs(dy)){
+        dragging = true;
+        btn.classList.add('dragging');
+        btn.dataset.dragged = '1';
+        try{ btn.setPointerCapture(pointerId); }catch(err){}
+        tabsEl.style.touchAction = 'none';
+      } else {
+        return;
+      }
+    }
+    e.preventDefault();
+    const x = e.clientX;
+    const siblings = [...tabsEl.querySelectorAll('.tab')].filter(t=>t!==btn);
+    let target = null;
+    for(const sib of siblings){
+      const r = sib.getBoundingClientRect();
+      if(x < r.left + r.width/2){ target = sib; break; }
+    }
+    if(target) tabsEl.insertBefore(btn, target);
+    else tabsEl.insertBefore(btn, tabsEl.querySelector('.tab-add'));
+  });
+
+  const finish = (e)=>{
+    if(pointerId===null || e.pointerId!==pointerId) return;
+    if(dragging){
+      dragging = false;
+      btn.classList.remove('dragging');
+      tabsEl.style.touchAction = '';
+      const newOrder = [...tabsEl.querySelectorAll('.tab')].map(t=>t.dataset.member);
+      state.members = newOrder;
+      saveData();
+      setTimeout(()=>{ delete btn.dataset.dragged; }, 400);
+    }
+    pointerId = null;
+  };
+  btn.addEventListener('pointerup', finish);
+  btn.addEventListener('pointercancel', finish);
+}
+
 function removeMember(m){
   if(state.members.length<=1){ toast('최소 1명은 남아야 합니다'); return; }
   if(!confirm(m+' 탭을 삭제할까요? (보유 종목도 함께 삭제됩니다)')) return;
   state.members = state.members.filter(x=>x!==m);
   delete state.holdings[m];
+  if(state.cash) delete state.cash[m];
   if(state.active===m) state.active = state.members[0];
   saveData(); render();
 }
@@ -650,7 +717,26 @@ function renderSummary(){
     <div class="stat"><div class="label">총평가손익</div><div class="val ${dir}">${pnl>=0?'+':''}${won(pnl)}</div></div>
     <div class="stat"><div class="label">수익률</div><div class="val ${dir}">${buyTotal>0?pct(pnlPct):'-'}</div></div>
   `;
+  const cash = (state.cash && state.cash[state.active]) || 0;
+  const cashInput = document.getElementById('cashInput');
+  // 입력 중(포커스 상태)이면 사용자가 타이핑 중인 값을 덮어쓰지 않음
+  if(document.activeElement !== cashInput) cashInput.value = cash || '';
+  document.getElementById('statTotalAssets').textContent = won(evalTotal + cash);
 }
+
+// 예수금 입력은 한 번만 만들어진 고정 엘리먼트라, blur(change) 시점에만 상태를 갱신하고
+// 총자산 텍스트만 갱신한다 (테이블과 동일한 이유로 전체 재렌더 금지 - 모바일에서 탭/입력이 씹히는 문제 방지)
+document.getElementById('cashInput').addEventListener('change', (e)=>{
+  if(!state.active) return;
+  const val = parseFloat(e.target.value.replace(/,/g,'')) || 0;
+  state.cash = state.cash || {};
+  state.cash[state.active] = val;
+  saveData();
+  const rows = state.holdings[state.active] || [];
+  let evalTotal = 0;
+  rows.forEach(h=>{ evalTotal += calcRow(h).evalTotal; });
+  document.getElementById('statTotalAssets').textContent = won(evalTotal + val);
+});
 
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
@@ -660,7 +746,9 @@ document.getElementById('addBtn').addEventListener('click', ()=>{
   const code = document.getElementById('newCode').value.trim();
   const buy = parseFloat(document.getElementById('newBuy').value.replace(/,/g,'')) || 0;
   const qty = parseFloat(document.getElementById('newQty').value.replace(/,/g,'')) || 0;
+  if(!state.active){ toast('먼저 + 버튼으로 구성원 탭을 추가하세요'); return; }
   if(!name){ toast('종목명을 입력하세요'); return; }
+  if(!state.holdings[state.active]) state.holdings[state.active] = [];
   state.holdings[state.active].push({id:cid(), name, code, buy, qty, cur:buy||0, updated:null});
   document.getElementById('newName').value='';
   document.getElementById('newCode').value='';
