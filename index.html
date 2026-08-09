@@ -554,31 +554,23 @@ document.getElementById('reorderToggle').addEventListener('click', ()=>{
 });
 
 // 순서변경 모드에서만 동작하는 드래그. 이 모드에서는 탭 탭(선택)과
-// 길게 눌러 삭제(contextmenu)를 아예 붙이지 않으므로 제스처 충돌이 없다.
+// 길게 눌러 삭제(contextmenu)를 아예 붙이지 않으므로, 문턱값 없이
+// 누르는 즉시 드래그를 시작해도 다른 동작과 충돌하지 않는다.
 function attachTabDrag(btn){
   const tabsEl = document.getElementById('tabs');
-  const THRESH = 4;
-  let startX = 0, startY = 0, dragging = false, pointerId = null;
+  let pointerId = null;
+  btn.style.touchAction = 'none'; // CSS 캐스케이드 타이밍에 의존하지 않도록 인라인으로 강제
 
   btn.addEventListener('pointerdown', (e)=>{
     if(e.pointerType==='mouse' && e.button!==0) return;
-    startX = e.clientX; startY = e.clientY;
-    dragging = false;
     pointerId = e.pointerId;
+    btn.classList.add('dragging');
     try{ btn.setPointerCapture(pointerId); }catch(err){}
+    e.preventDefault();
   });
 
   btn.addEventListener('pointermove', (e)=>{
     if(pointerId===null || e.pointerId!==pointerId) return;
-    const dx = e.clientX-startX, dy = e.clientY-startY;
-    if(!dragging){
-      if(Math.hypot(dx,dy) > THRESH){
-        dragging = true;
-        btn.classList.add('dragging');
-      } else {
-        return;
-      }
-    }
     e.preventDefault();
     const x = e.clientX;
     const siblings = [...tabsEl.querySelectorAll('.tab')].filter(t=>t!==btn);
@@ -593,13 +585,10 @@ function attachTabDrag(btn){
 
   const finish = (e)=>{
     if(pointerId===null || e.pointerId!==pointerId) return;
-    if(dragging){
-      dragging = false;
-      btn.classList.remove('dragging');
-      const newOrder = [...tabsEl.querySelectorAll('.tab')].map(t=>t.dataset.member);
-      state.members = newOrder;
-      saveData();
-    }
+    btn.classList.remove('dragging');
+    const newOrder = [...tabsEl.querySelectorAll('.tab')].map(t=>t.dataset.member);
+    state.members = newOrder;
+    saveData();
     pointerId = null;
   };
   btn.addEventListener('pointerup', finish);
