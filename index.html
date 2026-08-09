@@ -556,43 +556,63 @@ document.getElementById('reorderToggle').addEventListener('click', ()=>{
 // 순서변경 모드에서만 동작하는 드래그. 이 모드에서는 탭 탭(선택)과
 // 길게 눌러 삭제(contextmenu)를 아예 붙이지 않으므로, 문턱값 없이
 // 누르는 즉시 드래그를 시작해도 다른 동작과 충돌하지 않는다.
+// Pointer Events 대신, 인앱 브라우저(카카오/네이버 등)에서도 폭넓게 지원되는
+// 기본 touch/mouse 이벤트를 각각 따로 붙여서 호환성을 높인다.
 function attachTabDrag(btn){
   const tabsEl = document.getElementById('tabs');
-  let pointerId = null;
-  btn.style.touchAction = 'none'; // CSS 캐스케이드 타이밍에 의존하지 않도록 인라인으로 강제
+  let dragging = false;
+  btn.style.touchAction = 'none';
 
-  btn.addEventListener('pointerdown', (e)=>{
-    if(e.pointerType==='mouse' && e.button!==0) return;
-    pointerId = e.pointerId;
-    btn.classList.add('dragging');
-    try{ btn.setPointerCapture(pointerId); }catch(err){}
-    e.preventDefault();
-  });
-
-  btn.addEventListener('pointermove', (e)=>{
-    if(pointerId===null || e.pointerId!==pointerId) return;
-    e.preventDefault();
-    const x = e.clientX;
+  function reposition(clientX){
     const siblings = [...tabsEl.querySelectorAll('.tab')].filter(t=>t!==btn);
     let target = null;
     for(const sib of siblings){
       const r = sib.getBoundingClientRect();
-      if(x < r.left + r.width/2){ target = sib; break; }
+      if(clientX < r.left + r.width/2){ target = sib; break; }
     }
     if(target) tabsEl.insertBefore(btn, target);
     else tabsEl.appendChild(btn);
-  });
+  }
 
-  const finish = (e)=>{
-    if(pointerId===null || e.pointerId!==pointerId) return;
+  function endDrag(){
+    if(!dragging) return;
+    dragging = false;
     btn.classList.remove('dragging');
     const newOrder = [...tabsEl.querySelectorAll('.tab')].map(t=>t.dataset.member);
     state.members = newOrder;
     saveData();
-    pointerId = null;
-  };
-  btn.addEventListener('pointerup', finish);
-  btn.addEventListener('pointercancel', finish);
+  }
+
+  // 모바일 터치
+  btn.addEventListener('touchstart', ()=>{
+    dragging = true;
+    btn.classList.add('dragging');
+  }, {passive:true});
+
+  btn.addEventListener('touchmove', (e)=>{
+    if(!dragging) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    if(t) reposition(t.clientX);
+  }, {passive:false});
+
+  btn.addEventListener('touchend', endDrag);
+  btn.addEventListener('touchcancel', endDrag);
+
+  // PC 마우스
+  btn.addEventListener('mousedown', (e)=>{
+    if(e.button!==0) return;
+    dragging = true;
+    btn.classList.add('dragging');
+    const onMove = (e2)=>{ reposition(e2.clientX); };
+    const onUp = ()=>{
+      endDrag();
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
 }
 
 function removeMember(m){
