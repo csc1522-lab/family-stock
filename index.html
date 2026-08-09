@@ -42,9 +42,12 @@
 
   /* tabs */
   .tabs{display:flex;gap:6px;margin-bottom:14px;overflow-x:auto;padding-bottom:2px;}
-  .tab{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px 8px 0 0;background:var(--panel);color:var(--text-dim);border:1px solid var(--border);border-bottom:none;cursor:grab;white-space:nowrap;transition:.15s;touch-action:none;user-select:none;-webkit-user-select:none;}
+  .tab{font-family:var(--mono);font-size:13px;padding:8px 14px;border-radius:8px 8px 0 0;background:var(--panel);color:var(--text-dim);border:1px solid var(--border);border-bottom:none;cursor:pointer;white-space:nowrap;transition:.15s;user-select:none;-webkit-user-select:none;}
+  .tabs.reorder-mode .tab{touch-action:none;cursor:grab;}
   .tab.active{background:var(--panel-alt);color:var(--gold);border-color:var(--gold-dim);}
   .tab.dragging{opacity:.55;cursor:grabbing;box-shadow:0 0 0 1px var(--gold-dim) inset;}
+  .tab.reorder-active{cursor:grab;box-shadow:0 0 0 1px var(--gold-dim) inset;background:var(--panel-alt);}
+  #reorderToggle.on{color:var(--gold);font-weight:600;}
   .tab-add{font-family:var(--mono);font-size:16px;padding:8px 12px;border-radius:8px;background:transparent;color:var(--text-faint);border:1px dashed var(--border);cursor:pointer;}
   .tab-add:hover{color:var(--gold);border-color:var(--gold-dim);}
 
@@ -158,7 +161,8 @@
   </header>
 
   <div class="tabs" id="tabs"></div>
-  <div style="text-align:right;margin:-8px 0 10px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin:-8px 0 10px;">
+    <button id="reorderToggle" style="background:none;border:none;color:var(--text-faint);font-size:11px;cursor:pointer;text-decoration:underline;">↕ 순서변경</button>
     <button id="refreshAllBtn" style="background:none;border:none;color:var(--text-faint);font-size:11px;cursor:pointer;text-decoration:underline;">전체 구성원 새로고침</button>
   </div>
 
@@ -512,33 +516,48 @@ function render(){
   renderSummary();
 }
 
+let reorderMode = false;
+
 function renderTabs(){
   const el = document.getElementById('tabs');
   el.innerHTML = '';
+  el.classList.toggle('reorder-mode', reorderMode);
   state.members.forEach(m=>{
     const b = document.createElement('button');
-    b.className = 'tab' + (m===state.active?' active':'');
-    b.textContent = m;
+    b.className = 'tab' + (m===state.active?' active':'') + (reorderMode?' reorder-active':'');
+    b.textContent = (reorderMode?'⠿ ':'') + m;
     b.dataset.member = m;
-    b.onclick = ()=>{ if(b.dataset.dragged) return; state.active = m; render(); };
-    b.oncontextmenu = (e)=>{ e.preventDefault(); removeMember(m); };
-    attachTabDrag(b);
+    if(reorderMode){
+      attachTabDrag(b);
+    } else {
+      b.onclick = ()=>{ state.active = m; render(); };
+      b.oncontextmenu = (e)=>{ e.preventDefault(); removeMember(m); };
+    }
     el.appendChild(b);
   });
-  const add = document.createElement('button');
-  add.className = 'tab-add';
-  add.textContent = '+';
-  add.title = '구성원 추가';
-  add.onclick = addMember;
-  el.appendChild(add);
+  if(!reorderMode){
+    const add = document.createElement('button');
+    add.className = 'tab-add';
+    add.textContent = '+';
+    add.title = '구성원 추가';
+    add.onclick = addMember;
+    el.appendChild(add);
+  }
+  const toggleBtn = document.getElementById('reorderToggle');
+  toggleBtn.textContent = reorderMode ? '✓ 완료' : '↕ 순서변경';
+  toggleBtn.classList.toggle('on', reorderMode);
 }
 
-// 탭을 옆으로 밀어서 순서를 바꾸는 드래그 재정렬.
-// 움직임이 거의 없는 짧은 탭/길게 누르기는 그대로 선택/삭제(contextmenu)로 동작하고,
-// 실제로 좌우로 손가락(마우스)을 움직였을 때만 재정렬이 시작되도록 이동 거리 기준으로 판단한다.
+document.getElementById('reorderToggle').addEventListener('click', ()=>{
+  reorderMode = !reorderMode;
+  renderTabs();
+});
+
+// 순서변경 모드에서만 동작하는 드래그. 이 모드에서는 탭 탭(선택)과
+// 길게 눌러 삭제(contextmenu)를 아예 붙이지 않으므로 제스처 충돌이 없다.
 function attachTabDrag(btn){
   const tabsEl = document.getElementById('tabs');
-  const THRESH = 10;
+  const THRESH = 4;
   let startX = 0, startY = 0, dragging = false, pointerId = null;
 
   btn.addEventListener('pointerdown', (e)=>{
@@ -546,18 +565,16 @@ function attachTabDrag(btn){
     startX = e.clientX; startY = e.clientY;
     dragging = false;
     pointerId = e.pointerId;
+    try{ btn.setPointerCapture(pointerId); }catch(err){}
   });
 
   btn.addEventListener('pointermove', (e)=>{
     if(pointerId===null || e.pointerId!==pointerId) return;
     const dx = e.clientX-startX, dy = e.clientY-startY;
     if(!dragging){
-      if(Math.abs(dx) > THRESH && Math.abs(dx) > Math.abs(dy)){
+      if(Math.hypot(dx,dy) > THRESH){
         dragging = true;
         btn.classList.add('dragging');
-        btn.dataset.dragged = '1';
-        try{ btn.setPointerCapture(pointerId); }catch(err){}
-        tabsEl.style.touchAction = 'none';
       } else {
         return;
       }
@@ -571,7 +588,7 @@ function attachTabDrag(btn){
       if(x < r.left + r.width/2){ target = sib; break; }
     }
     if(target) tabsEl.insertBefore(btn, target);
-    else tabsEl.insertBefore(btn, tabsEl.querySelector('.tab-add'));
+    else tabsEl.appendChild(btn);
   });
 
   const finish = (e)=>{
@@ -579,11 +596,9 @@ function attachTabDrag(btn){
     if(dragging){
       dragging = false;
       btn.classList.remove('dragging');
-      tabsEl.style.touchAction = '';
       const newOrder = [...tabsEl.querySelectorAll('.tab')].map(t=>t.dataset.member);
       state.members = newOrder;
       saveData();
-      setTimeout(()=>{ delete btn.dataset.dragged; }, 400);
     }
     pointerId = null;
   };
