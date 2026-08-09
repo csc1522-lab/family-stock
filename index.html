@@ -463,9 +463,9 @@ async function storageGet(key, shared){
 }
 async function storageSet(key, value, shared){
   if(hasCloudStorage){
-    try{ return await window.storage.set(key, value, shared); }catch(e){ console.error('[storageSet/cloud 에러]', e); return null; }
+    try{ return await window.storage.set(key, value, shared); }catch(e){ return null; }
   }
-  try{ localStorage.setItem(key, value); return {key, value, shared}; }catch(e){ console.error('[storageSet/local 에러]', e); return null; }
+  try{ localStorage.setItem(key, value); return {key, value, shared}; }catch(e){ return null; }
 }
 
 async function loadData(){
@@ -489,12 +489,12 @@ async function loadData(){
 async function saveData(){
   try{
     await storageSet('familyStock:data', JSON.stringify({members:state.members, active:state.active, holdings:state.holdings}), true);
-  }catch(e){ console.error('[saveData 에러]', e); toast('저장 실패: ' + e.message); }
+  }catch(e){ toast('저장 실패 - 다시 시도해주세요'); }
 }
 async function saveSettings(){
   try{
     await storageSet('familyStock:settings', JSON.stringify(state.settings), true);
-  }catch(e){ console.error('[saveSettings 에러]', e); toast('설정 저장 실패: ' + e.message); }
+  }catch(e){ toast('설정 저장 실패'); }
 }
 
 
@@ -581,17 +581,18 @@ function renderTable(){
     const {buyTotal, evalTotal, pnl, pnlPct} = calcRow(h);
     const dir = pnl>0?'up':(pnl<0?'down':'');
     const tr = document.createElement('tr');
+    tr.dataset.row = h.id;
     tr.innerHTML = `
       <td style="text-align:center;font-family:var(--sans);color:var(--text-faint)">${i+1}</td>
       <td class="name">${escapeHtml(h.name)}</td>
       <td class="code"><input type="text" data-field="code" data-id="${h.id}" value="${escapeHtml(h.code||'')}" placeholder="코드 입력" style="width:70px;"></td>
       <td><input type="text" inputmode="numeric" data-field="buy" data-id="${h.id}" value="${h.buy||''}"></td>
-      <td class="${h.updated?'price-fresh':''}"><input type="text" inputmode="numeric" data-field="cur" data-id="${h.id}" value="${h.cur||''}"></td>
+      <td class="cell-cur ${h.updated?'price-fresh':''}"><input type="text" inputmode="numeric" data-field="cur" data-id="${h.id}" value="${h.cur||''}"></td>
       <td><input type="text" inputmode="numeric" data-field="qty" data-id="${h.id}" value="${h.qty||''}"></td>
-      <td>${won(buyTotal)}</td>
-      <td>${won(evalTotal)}</td>
-      <td class="pnl ${dir}">${pnl>0?'▲':pnl<0?'▼':''} ${won(Math.abs(pnl))}</td>
-      <td class="pct ${dir}">${buyTotal>0?pct(pnlPct):'-'}</td>
+      <td class="cell-buyTotal">${won(buyTotal)}</td>
+      <td class="cell-evalTotal">${won(evalTotal)}</td>
+      <td class="cell-pnl pnl ${dir}">${pnl>0?'▲':pnl<0?'▼':''} ${won(Math.abs(pnl))}</td>
+      <td class="cell-pct pct ${dir}">${buyTotal>0?pct(pnlPct):'-'}</td>
       <td><button class="delbtn" data-del="${h.id}">✕</button></td>
     `;
     tbody.appendChild(tr);
@@ -602,7 +603,7 @@ function renderTable(){
       const id = e.target.dataset.id, field = e.target.dataset.field;
       const val = (field==='code') ? e.target.value.trim() : (parseFloat(e.target.value.replace(/,/g,'')) || 0);
       const row = (state.holdings[state.active]||[]).find(x=>x.id===id);
-      if(row){ row[field] = val; saveData(); renderSummary(); renderTableCellsOnly(); }
+      if(row){ row[field] = val; saveData(); updateRowComputed(id); renderSummary(); }
     });
   });
   tbody.querySelectorAll('[data-del]').forEach(btn=>{
@@ -614,8 +615,27 @@ function renderTable(){
   });
 }
 
-// lightweight re-render for computed cells only (avoids losing input focus on every keystroke path)
-function renderTableCellsOnly(){ renderTable(); renderSummary(); }
+// 실제로 가벼운 갱신: 해당 행의 계산된 셀만 텍스트를 바꾸고, input 엘리먼트는 절대 다시 만들지 않음.
+// (예전 renderTableCellsOnly()는 이름과 달리 renderTable() 전체를 다시 그려서
+//  모바일에서 blur→change 처리 중 탭했던 버튼/입력창 DOM이 통째로 교체되어
+//  탭 전환·연속 입력이 씹히는 원인이었음)
+function updateRowComputed(id){
+  const tr = document.getElementById('tbody').querySelector(`tr[data-row="${id}"]`);
+  const row = (state.holdings[state.active]||[]).find(x=>x.id===id);
+  if(!tr || !row) return;
+  const {buyTotal, evalTotal, pnl, pnlPct} = calcRow(row);
+  const dir = pnl>0?'up':(pnl<0?'down':'');
+  tr.querySelector('.cell-buyTotal').textContent = won(buyTotal);
+  tr.querySelector('.cell-evalTotal').textContent = won(evalTotal);
+  const pnlCell = tr.querySelector('.cell-pnl');
+  pnlCell.className = 'cell-pnl pnl ' + dir;
+  pnlCell.textContent = (pnl>0?'▲':pnl<0?'▼':'') + ' ' + won(Math.abs(pnl));
+  const pctCell = tr.querySelector('.cell-pct');
+  pctCell.className = 'cell-pct pct ' + dir;
+  pctCell.textContent = buyTotal>0?pct(pnlPct):'-';
+  const curCell = tr.querySelector('.cell-cur');
+  if(curCell) curCell.classList.toggle('price-fresh', !!row.updated);
+}
 
 function renderSummary(){
   const rows = state.holdings[state.active] || [];
